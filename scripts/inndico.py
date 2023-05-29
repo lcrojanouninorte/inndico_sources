@@ -36,13 +36,26 @@ def create_superset_chart(data_dict, access_token):
         chart_url = f"{superset_url}/api/v1/chart"
 
         chart_data = {
+            "description": data_dict["descripcion"],
             "datasource_id": data_dict["superset_dataset_id"],
             "datasource_type": "table",
             "slice_name": data_dict["chart_title"],
             "viz_type": data_dict["viz_type"],
-
+            "params": json.dumps({
+                "x_axis_label": data_dict["x_axis_label"],
+                "y_axis_label": data_dict["y_axis_label"],
+                "groupby": data_dict["groupby"],
+                "metrics": json.loads(data_dict["metrics"]),
+                "show_legend": True,
+                "show_values": True,
+                "show_bar_value": True,
+                "rich_tooltip": True,
+                "bar_stacked": True,
+                "thumbnail_url": "https://ctinu.mannajar.co/wp-content/uploads/2023/05/pie-chart-1.png"
+            })
         }
 
+        # ,
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
