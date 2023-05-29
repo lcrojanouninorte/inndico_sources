@@ -3,10 +3,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text, column
 import requests
 from credentials import *
+from openai_cr import *
 from supersetapiclient.client import SupersetClient
 import json
 import string
 import random
+import openai
 
 
 def delete_charts_from_bot():
@@ -64,6 +66,8 @@ def create_superset_chart(data_dict, access_token):
         response = requests.post(chart_url, headers=headers, json=chart_data)
         response.raise_for_status()
         chart = response.json()
+
+        # update postprocesed table with chart id
 
         return chart
 
@@ -166,17 +170,19 @@ def update_dataset_post_processed_table(dataset_id, table_name, data_dict):
             SET superset_dataset_name = :table_name,
                 superset_dataset_id = :dataset_id,
                 chart_title = :chart_title
+               
             WHERE id = :id
         """
 
         chart_title = data_dict["nombre"] if (data_dict["virtual_data_source_id"] is None or data_dict[
             "virtual_data_source_id"] is None) else data_dict["virtual_table_nombre"]
-        print(chart_title)
+
         connection.execute(
             text(update_query),
             table_name=table_name,
             dataset_id=dataset_id,
             chart_title=chart_title,
+            # ia_analysis=data_dict["ia_analysis"],
             id=str(data_dict['id'])
         )
 
@@ -189,6 +195,12 @@ def update_dataset_post_processed_table(dataset_id, table_name, data_dict):
 def get_final_resource_name(data_dict):
     resoure_title = data_dict["nombre"] if (data_dict["virtual_data_source_id"] is None or data_dict[
         "virtual_data_source_id"] is None) else data_dict["virtual_table_nombre"]
+    return resoure_title
+
+
+def get_final_sector_name(data_dict):
+    resoure_title = data_dict["sector"] \
+        if (data_dict["virtual_data_source_id"] is None) else data_dict["virtual_table_sector"]
     return resoure_title
 
 
@@ -208,7 +220,11 @@ def get_post_processed_table_data():
   #  """
     query = f"""
           SELECT DISTINCT ON (pp.id) pp.*, rds.nombre AS nombre, rds.descripcion AS descripcion,
-                vt.idic AS idic, vt.nombre AS virtual_table_nombre, vt.descripcion AS virtual_table_descripcion, vt.sector AS virtual_table_sector
+                rds.sector AS sector,
+                vt.idic AS idic, 
+                vt.nombre AS virtual_table_nombre, 
+                vt.descripcion AS virtual_table_descripcion, 
+                vt.sector AS virtual_table_sector
 
         FROM {schema}.{post_processed_table_name} pp
         LEFT JOIN {schema}.{raw_table_name} rds ON pp.raw_data_source_id = rds.id
@@ -234,3 +250,193 @@ def get_post_processed_table_data():
 def generate_random_string(length):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for _ in range(length))
+
+
+def get_ia_analysis(title, dataframe):
+    texto_dataframe = dataframe.to_string(index=False)
+    reduced_text = reduce_text_length(texto_dataframe, max_tokens=3500)
+    texto_dataframe = f"Tabla: {title} algunos datos: {reduced_text}"
+
+    entrada = f"Actúa como un científico de datos, \
+          en maximo 200 caracteres  escribe un informe \
+            con base en  dataframe:\n\n{texto_dataframe}\n\n Análisis:"
+
+    messages = [
+        {"role": "system", "content": "Eres un analista de datos experto en datos de cordoba colombia"},
+        {"role": "user", "content": entrada},
+    ]
+
+    # Configurar la API de OpenAI
+    openai.api_key = openai_api_key
+    # Generar la respuesta del modelo utilizando la API de OpenAI
+    respuesta = None
+    messages[-1]["content"] = entrada
+    respuesta = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo", messages=messages)
+
+    # Obtener el análisis generado por el modelo
+    analisis = respuesta.choices[-1].message.content
+    print(f"ChatGPT: {analisis}")
+    return analisis
+
+
+def reduce_text_length(text, max_tokens):
+    tokenized_text = text.split()
+    if len(tokenized_text) <= max_tokens:
+        return text
+    else:
+        reduced_text = ' '.join(tokenized_text[:max_tokens])
+        return reduced_text
+
+
+def split_text_into_parts(text, max_tokens_per_part):
+    parts = []
+    current_part = ""
+    tokens_count = 0
+    for token in text.split():
+        tokens_count += len(token.split())
+        if tokens_count <= max_tokens_per_part:
+            current_part += token + " "
+        else:
+            parts.append(current_part.strip())
+            current_part = token + " "
+            tokens_count = len(token.split())
+    if current_part:
+        parts.append(current_part.strip())
+    return parts
+
+# WORDPRESS
+
+
+def get_wordpress_token():
+    try:
+        # Datos de acceso al sitio web WordPress
+        wordpress_url = inndico_website_url
+        wordpress_username = inndico_website_user
+        wordpress_password = inndico_website_password
+
+        # Inicio de sesión en WordPress
+        login_url = f'{wordpress_url}/wp-json/jwt-auth/v1/token'
+        login_data = {
+            'username': wordpress_username,
+            'password': wordpress_password
+        }
+        response = requests.post(login_url, json=login_data)
+        response.raise_for_status()
+        auth_token = json.loads(response.text)['token']
+        return auth_token
+    except requests.exceptions.RequestException as e:
+        print('Error al realizar una solicitud HTTP:', e)
+        return None
+    except (KeyError, ValueError) as e:
+        print('Error al procesar los datos JSON:', e)
+        return None
+    except Exception as e:
+        print('Ocurrió un error:', e)
+        return None
+
+
+def get_sector_id_by_name(sector_name):
+    try:
+        # Configura la URL base de la API REST de WordPress
+        wp_api_url = f'{inndico_website_url}/wp-json/wp/v2'
+
+        # Realiza una solicitud GET para obtener todos los términos de la taxonomía "sector"
+        response = requests.get(f'{wp_api_url}/sector')
+
+        if response.status_code == 200:
+            sectors = response.json()
+
+            # Busca el ID del sector "Entorno Productivo"
+            for sector in sectors:
+                if sector['name'].lower() == sector_name.lower():
+                    return sector['id']
+
+    except requests.RequestException as e:
+        # Error de solicitud
+        print(f'Error de solicitud: {e}')
+
+    except Exception as e:
+        # Otro tipo de error
+        print(f'Ocurrió un error: {e}')
+
+    # Si no se encuentra el sector o hay errores, devuelve None
+    return "55"
+
+
+def delete_all_inndico_post(username):
+    auth_token = get_wordpress_token()
+
+    author_id = get_wordpress_autor_id(username)
+    print(author_id)
+    try:
+        # Verificar si se obtuvo el token de autenticación
+        if auth_token and author_id is not None:
+
+            # Obtener la lista de posts de WordPress que cumplen con los criterios
+            posts_url = f'{inndico_website_url}/wp-json/wp/v2/indicadores'
+            params = {
+                # 'sector': 55,
+                'author': author_id,
+                'per_page': 100  # Ajusta este valor según la cantidad de posts a eliminar
+            }
+            headers = {
+                'Authorization': f'Bearer {auth_token}'
+            }
+            posts_response = requests.get(
+                posts_url, params=params, headers=headers)
+            posts_response.raise_for_status()
+            posts = posts_response.json()
+
+            # Eliminar los posts encontrados
+            for post in posts:
+                post_id = post['id']
+                delete_url = f'{inndico_website_url}/wp-json/wp/v2/indicadores/{post_id}'
+                delete_response = requests.delete(delete_url, headers=headers)
+                delete_response.raise_for_status()
+
+                if delete_response.status_code == 200:
+                    print(f'Post {post_id} eliminado exitosamente')
+                else:
+                    print(f'Error al eliminar el post {post_id}')
+        else:
+            print('Error al obtener el token de autenticación')
+
+    except requests.exceptions.RequestException as e:
+        print(f'Error al realizar una solicitud HTTP: {e}')
+
+    except Exception as e:
+        print(f'Error inesperado: {e}')
+
+
+def get_wordpress_autor_id(nombre_autor):
+    # Configure the WordPress API URL
+    bearer_token = get_wordpress_token()
+    print(bearer_token)
+    url_wordpress_api = f'{inndico_website_url}/wp-json/wp/v2'
+
+    try:
+        # Prepare the headers with the bearer token
+        headers = {
+            'Authorization': f'Bearer {bearer_token}'
+        }
+
+        # Perform a GET request to the authors endpoint
+        response = requests.get(
+            f"{url_wordpress_api}/users", params={'slug': nombre_autor}, headers=headers)
+
+       # Check the response status code
+        response.raise_for_status()
+
+        autores = response.json()
+
+        if autores:
+            # Get the ID of the author
+            id_autor = autores[0]['id']
+            return id_autor
+
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Error al realizar la solicitud a la API: {str(e)}")
+
+    # If the author is not found, return None
+    return None

@@ -1,4 +1,7 @@
 superset_url = 'https://superset.mannajar.co'  # Superset URL
+inndico_website_url = 'https://ctinu.mannajar.co'  # Superset URL
+inndico_website_user = 'inndico.bot'
+inndico_website_password = '...Indico_Bot...'
 database_name = 'INNDICO PostgreSQL Db'  # Destination database name
 password = '...Indico_Bot...'
 username = 'inndico.bot'
