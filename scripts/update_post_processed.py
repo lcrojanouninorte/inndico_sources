@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.sql import text
 from credentials import *
+import json
 
 
 def update_post_processed(params):
@@ -14,6 +15,8 @@ def update_post_processed(params):
         y_axis_label = params['y_axis_label']
         groupby = params['groupby']
         csv_data_source = params['csv_data_source']
+        metrics = json.dumps(params['metrics'])
+        viz_type = params['viz_type']
 
         raw_data_source_id = None
         if 'raw_data_source_id' in params and params['raw_data_source_id']:
@@ -24,10 +27,15 @@ def update_post_processed(params):
             virtual_data_source_id = int(params['virtual_data_source_id'])
 
         # Build the query
-        query = text(f"INSERT INTO {schema}.{post_processed_table_name} (x_axis_label, y_axis_label, groupby, csv_data_source, raw_data_source_id, virtual_data_source_id) VALUES (:x_axis_label, :y_axis_label, :groupby, :csv_data_source, :raw_data_source_id, :virtual_data_source_id)")
+        query = text(f"INSERT INTO {schema}.{post_processed_table_name} \
+                     (viz_type, metrics, x_axis_label, y_axis_label, groupby, \
+                     csv_data_source, raw_data_source_id, virtual_data_source_id) \
+                     VALUES (:viz_type, :metrics, :x_axis_label, :y_axis_label, \
+                     :groupby, :csv_data_source, :raw_data_source_id, \
+                     :virtual_data_source_id)")
 
         # Execute the query
-        result = engine.execute(query, x_axis_label=x_axis_label, y_axis_label=y_axis_label, groupby=groupby,
+        result = engine.execute(query, viz_type=viz_type, metrics=metrics, x_axis_label=x_axis_label, y_axis_label=y_axis_label, groupby=groupby,
                                 csv_data_source=csv_data_source, raw_data_source_id=raw_data_source_id, virtual_data_source_id=virtual_data_source_id)
 
         # Show the result of the query
